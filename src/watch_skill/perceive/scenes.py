@@ -13,6 +13,7 @@ from pathlib import Path
 
 from watch_skill.errors import PerceptionError
 from watch_skill.health.binaries import require_binary
+from watch_skill.perceive.ffmpeg import hardware_decode_args
 
 _SCENE_TIME = re.compile(r"pts_time:([0-9.]+)")
 _FFMPEG_TIMEOUT = 900.0
@@ -56,6 +57,7 @@ def detect_scenes_ffmpeg(
     if lo:
         command += ["-ss", f"{lo:.3f}"]
     command += [
+        *hardware_decode_args(),
         "-i", str(video_path.resolve()),
         "-t", f"{hi - lo:.3f}",
         "-an", "-vf", f"select=gt(scene\\,{threshold}),showinfo",

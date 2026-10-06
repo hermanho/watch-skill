@@ -7,6 +7,7 @@ from pathlib import Path
 
 from watch_skill.errors import PerceptionError
 from watch_skill.health.binaries import require_binary
+from watch_skill.perceive.ffmpeg import hardware_decode_args
 from watch_skill.perceive.types import VideoMetadata
 
 MAX_READ_DIMENSION = 1998  # Claude Read tool image-height limit (reference-proven)
@@ -74,9 +75,11 @@ def extract_frame_at(
     """
     ffmpeg = require_binary("ffmpeg")
     dest.parent.mkdir(parents=True, exist_ok=True)
+    hwaccel_args = hardware_decode_args()
     cmd = [
         str(ffmpeg), "-hide_banner", "-loglevel", "error", "-y",
         "-ss", f"{max(0.0, timestamp_seconds):.3f}",
+        *hwaccel_args,
         "-i", str(video_path.resolve()),
         "-frames:v", "1",
         "-vf", _scale_filter(width),
@@ -87,6 +90,15 @@ def extract_frame_at(
         cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
         stdin=subprocess.DEVNULL,
     )
+    if result.returncode != 0 and hwaccel_args:
+        dest.unlink(missing_ok=True)
+        raise PerceptionError(
+            f"ffmpeg frame extraction failed: {result.stderr.strip()[-1000:]}",
+            code="perceive.frame_extraction_failed",
+            fix="check the configured FFmpeg hardware decode backend/device and driver, "
+            "or unset WATCHSKILL_FFMPEG_HWACCEL to disable hardware decode",
+            details={"path": str(video_path), "exit_code": result.returncode},
+        )
     if result.returncode != 0 or not dest.is_file() or dest.stat().st_size == 0:
         dest.unlink(missing_ok=True)
         return None

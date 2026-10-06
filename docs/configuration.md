@@ -46,11 +46,48 @@ cases), `<data_dir>/health.jsonl` (incident log),
 | Variable | Type | Default | Effect |
 |---|---|---|---|
 | `WATCHSKILL_MAX_VIDEO_HEIGHT` | int | `720` | Ceiling for downloaded video height, 144–1080. 720p answers almost every question a video can answer; 4K costs minutes of transfer and gigabytes of disk to answer it no better. Every rung of the format selector carries this cap **and** an audio stream — a video-only fallback surfaces later as a mysteriously empty transcript. A source that yt-dlp confirms has *no* audio stream is downloaded video-only and reports `audio_status: audio_unavailable`; an unanswerable probe reports `audio_unknown` and does not authorise that path. |
+| `WATCHSKILL_SCENE_BACKEND` | str | `scenedetect` | Scene detector: `scenedetect` or `ffmpeg`. |
+| `WATCHSKILL_FFMPEG_HWACCEL` | str | empty | Optional FFmpeg hardware decode backend (e.g. `vaapi` or `cuda`); empty disables it. Applies to FFmpeg scene detection and frame extraction. |
+| `WATCHSKILL_FFMPEG_HW_DEVICE` | str | empty | Optional hardware decode device; unset lets FFmpeg choose. Ignored when hardware decode is disabled. |
 | `WATCHSKILL_FRAME_WIDTH` | int | `512` | Extracted frame width in pixels. Higher = sharper OCR, more tokens per frame if sent to a vision model. |
 | `WATCHSKILL_FRAME_CAP` | int | `100` | Hard cap on frames per analysis, regardless of duration. |
 | `WATCHSKILL_MAX_FPS` | float | `2.0` | Universal sampling-rate ceiling; even focused mode never samples denser than this. |
 | `WATCHSKILL_PHASH_DISTANCE` | int | `6` | Max Hamming distance between perceptual hashes for two frames to count as near-duplicates (and be deduplicated). Lower = keep more similar frames. |
 | `WATCHSKILL_OCR_ENABLED` | bool | `true` | Run OCR on kept frames. Per-script recognition models (Arabic, Cyrillic, Korean, …) auto-download on first use. |
+
+#### Optional FFmpeg hardware decode (Linux Intel VAAPI example)
+
+The default remains PySceneDetect/OpenCV. The official [OpenCV PyPI
+wheels](https://github.com/opencv/opencv-python) are CPU-only and may not
+include VAAPI. Select the FFmpeg scene backend to use the installed FFmpeg
+hardware decode path, independently of OpenCV. Put these lines in `.env`,
+or export them as environment variables:
+
+```dotenv
+WATCHSKILL_SCENE_BACKEND=ffmpeg
+WATCHSKILL_FFMPEG_HWACCEL=vaapi
+WATCHSKILL_FFMPEG_HW_DEVICE=/dev/dri/renderD128
+```
+
+The device is an example, not a default. Check VAAPI driver capabilities
+independently with [`vainfo`](https://github.com/intel/libva-utils) (for example,
+`vainfo --display drm --device /dev/dri/renderD128`). FFmpeg itself must be
+built with the requested backend, with a working driver and device access.
+Managed binaries take precedence over PATH; ensure the binary Watch Skill
+resolves has the required support.
+
+Both FFmpeg scene detection and JPEG extraction receive `-hwaccel` and the
+optional `-hwaccel_device` before `-i`. No `-hwaccel_output_format` is forced:
+scene filters (`select`/`showinfo`), software scaling, JPEG encoding and OCR
+retain their existing CPU processing. [Frame transfers to system
+memory](https://ffmpeg.org/ffmpeg.html#Advanced-Video-options) also have a cost,
+so configuring hardware decode does not establish a speedup or verify that
+your codec is hardware decoded. Verify runtime behavior separately.
+
+Failed FFmpeg commands use `PerceptionError`, without a software-decode retry
+or backend switch. Scene detection retains its existing graceful fallback to
+uniform sampling; hardware-configured frame extraction surfaces nonzero exits
+as errors. An empty frame at a successful end-of-stream seek is still skipped.
 
 ### Transcription
 

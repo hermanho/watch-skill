@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -39,6 +40,15 @@ class Settings(BaseSettings):
     )
 
     # --- perception (defaults inherited from the reference project) ------
+    scene_backend: Literal["scenedetect", "ffmpeg"] = Field(
+        default="scenedetect", description="Scene detection backend."
+    )
+    ffmpeg_hwaccel: str = Field(
+        default="", description="FFmpeg hardware decode backend (e.g. vaapi); empty disables it."
+    )
+    ffmpeg_hw_device: str = Field(
+        default="", description="FFmpeg hardware decode device; empty lets FFmpeg choose."
+    )
     frame_width: int = Field(default=512, description="Extracted frame width in px.")
     max_video_height: int = Field(
         default=720,

@@ -50,6 +50,10 @@ def isolated_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     # suite, so it names both.
     monkeypatch.setenv("WATCHSKILL_WHISPER_MODEL", "tiny")
     monkeypatch.setenv("WATCHSKILL_WHISPER_DEVICE", "cpu")
+    # Hardware configuration must not make the offline suite depend on a GPU.
+    monkeypatch.setenv("WATCHSKILL_SCENE_BACKEND", "scenedetect")
+    monkeypatch.setenv("WATCHSKILL_FFMPEG_HWACCEL", "")
+    monkeypatch.setenv("WATCHSKILL_FFMPEG_HW_DEVICE", "")
     reset_settings()
     _reset_process_globals()
     yield data_dir

@@ -207,7 +207,12 @@ def detect_or_empty(
 ) -> list[tuple[float, float]]:
     """Scene detection that degrades to uniform sampling instead of failing."""
     try:
-        return scenes.detect_scenes(video_path, start_seconds, end_seconds)
+        detector = (
+            scenes.detect_scenes_ffmpeg
+            if get_settings().scene_backend == "ffmpeg"
+            else scenes.detect_scenes
+        )
+        return detector(video_path, start_seconds, end_seconds)
     except PerceptionError as exc:
         print(f"[watch-skill] scene detection unavailable ({exc.code}) — uniform sampling", file=sys.stderr)
         return []
