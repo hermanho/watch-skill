@@ -119,7 +119,7 @@ def test_shared_hardware_input_args(backend, device, expected, operation, tmp_pa
         prefix = ["ffmpeg", "-hide_banner", "-loglevel", "info", "-ss", "1.000"]
         vf = "select=gt(scene\\,0.3),showinfo"
         if backend == "vaapi":
-            vf = f"{media.vaapi_scale_filter(640, 640)},fps=2.0,{vf}"
+            vf = f"fps=2.0,{media.vaapi_scale_filter(640, 640)},{vf}"
         suffix = ["-t", "4.000", "-an", "-vf", vf,
                   "-f", "null", "-"]
     else:
@@ -188,7 +188,9 @@ def test_vaapi_scene_settings_are_independent(monkeypatch, tmp_path) -> None:
     assert scenes.detect_scenes_ffmpeg(tmp_path / "video.mp4", 1, 5) == [(1, 3), (3, 5)]
     vf = run.call_args.args[0][run.call_args.args[0].index("-vf") + 1]
     assert "min(960,iw)" in vf and "min(960,ih)" in vf
-    assert "fps=3.0" in vf and "1200" not in vf
+    assert vf.startswith("fps=3.0,scale_vaapi=")
+    assert vf.index("scale_vaapi=") < vf.index("hwdownload") < vf.index("format=nv12", vf.index("hwdownload"))
+    assert "1200" not in vf
 
 
 @pytest.mark.parametrize("kwargs", [
@@ -198,3 +200,36 @@ def test_vaapi_scene_settings_are_independent(monkeypatch, tmp_path) -> None:
 def test_invalid_scale_settings_rejected(kwargs) -> None:
     with pytest.raises(ValidationError):
         Settings(**kwargs)
+
+
+@pytest.mark.parametrize(("source_size", "expected"), [
+    ("1280x720", "640x360"),
+    ("800x600", "640x480"),
+    ("720x1280", "360x640"),
+    ("1280x540", "640x270"),
+    ("320x240", "320x240"),
+])
+def test_scene_scale_dimensions_with_ffmpeg(source_size, expected, monkeypatch) -> None:
+    """Exercise the shared scaling geometry with software FFmpeg on any platform.
+
+    VAAPI itself requires a GPU, so this checks FFmpeg's equivalent scale
+    expression rather than claiming a hardware integration test.
+    """
+    import re
+    import shutil
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        pytest.skip("ffmpeg unavailable")
+    monkeypatch.setenv("WATCHSKILL_FFMPEG_HWACCEL", "vaapi")
+    reset_settings()
+    scale = scenes._scene_filter(0.3).split(",hwdownload", 1)[0]
+    scale = scale.replace("scale_vaapi=", "scale=").replace(":format=nv12", "")
+    result = subprocess.run(
+        [ffmpeg, "-hide_banner", "-loglevel", "info", "-f", "lavfi",
+         "-i", f"color=black:s={source_size}:r=2:d=1", "-vf", f"{scale},showinfo",
+         "-frames:v", "1", "-f", "null", "-"],
+        capture_output=True, text=True, check=True,
+    )
+    match = re.search(r"\bs:(\d+x\d+)", result.stderr)
+    assert match and match.group(1) == expected

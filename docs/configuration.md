@@ -78,8 +78,11 @@ built with the requested backend, with a working driver and device access.
 Managed binaries take precedence over PATH; ensure the binary Watch Skill
 resolves has the required support.
 
-VAAPI outputs GPU frames and scales them with `scale_vaapi` before downloading
-to system memory. Scene detection uses its separate size and FPS settings;
+VAAPI samples GPU frames at the configured scene FPS, then scales them with
+`scale_vaapi` before downloading to system memory. Sampling can miss short
+shots and shift detected cuts to a sampled frame; increase the scene FPS when
+those details matter. The FFmpeg build and driver must support `fps` on VAAPI
+frames. Scene detection uses its separate size and FPS settings;
 JPEG extraction uses `WATCHSKILL_FRAME_WIDTH` and retains the 1998-pixel
 height limit. Scaling preserves aspect ratio and avoids enlarging small frames.
 Other hardware and software backends retain their existing filter paths.

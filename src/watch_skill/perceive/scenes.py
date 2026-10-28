@@ -28,8 +28,8 @@ def _scene_filter(threshold: float) -> str:
     scene_filter = f"select=gt(scene\\,{threshold}),showinfo"
     if settings.ffmpeg_hwaccel == "vaapi":
         size = settings.ffmpeg_scene_max_dimension
-        return (f"{vaapi_scale_filter(size, size)},"
-                f"fps={settings.ffmpeg_scene_fps},{scene_filter}")
+        return (f"fps={settings.ffmpeg_scene_fps},"
+                f"{vaapi_scale_filter(size, size)},{scene_filter}")
     return scene_filter
 
 
