@@ -11,15 +11,26 @@ import re
 import subprocess
 from pathlib import Path
 
+from watch_skill.config import get_settings
 from watch_skill.errors import PerceptionError
 from watch_skill.health.binaries import require_binary
-from watch_skill.perceive.ffmpeg import hardware_decode_args
+from watch_skill.perceive.ffmpeg import hardware_decode_args, vaapi_scale_filter
 
 _SCENE_TIME = re.compile(r"pts_time:([0-9.]+)")
 _FFMPEG_TIMEOUT = 900.0
 _STDERR_CAP = 4_000_000
 """Bound what we read back from ffmpeg. `showinfo` prints a line per selected
 frame, and a pathological source could otherwise fill memory with log text."""
+
+
+def _scene_filter(threshold: float) -> str:
+    settings = get_settings()
+    scene_filter = f"select=gt(scene\\,{threshold}),showinfo"
+    if settings.ffmpeg_hwaccel == "vaapi":
+        size = settings.ffmpeg_scene_max_dimension
+        return (f"{vaapi_scale_filter(size, size)},"
+                f"fps={settings.ffmpeg_scene_fps},{scene_filter}")
+    return scene_filter
 
 
 def detect_scenes_ffmpeg(
@@ -42,32 +53,31 @@ def detect_scenes_ffmpeg(
     window offset is added back explicitly, and a test with a known cut inside
     a non-zero window is what holds that.
     """
+    # pylint: disable-next=import-outside-toplevel
     from watch_skill.perceive.media import probe  # noqa: PLC0415
 
-    metadata = probe(video_path)
-    duration = metadata.duration_seconds or 0.0
+    duration = probe(video_path).duration_seconds or 0.0
     lo = max(0.0, start_seconds or 0.0)
     hi = min(end_seconds if end_seconds is not None else duration, duration) \
         if duration else (end_seconds or 0.0)
     if hi <= lo:
         return []
 
-    ffmpeg = require_binary("ffmpeg")
-    command = [str(ffmpeg), "-hide_banner", "-loglevel", "info"]
+    command = [str(require_binary("ffmpeg")), "-hide_banner", "-loglevel", "info"]
     if lo:
         command += ["-ss", f"{lo:.3f}"]
     command += [
         *hardware_decode_args(),
         "-i", str(video_path.resolve()),
         "-t", f"{hi - lo:.3f}",
-        "-an", "-vf", f"select=gt(scene\\,{threshold}),showinfo",
+        "-an", "-vf", _scene_filter(threshold),
         "-f", "null", "-",
     ]
 
     try:
         result = subprocess.run(
             command, capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=_FFMPEG_TIMEOUT, stdin=subprocess.DEVNULL,
+            errors="replace", timeout=_FFMPEG_TIMEOUT, stdin=subprocess.DEVNULL, check=False,
         )
     except subprocess.TimeoutExpired as exc:
         raise PerceptionError(
@@ -108,22 +118,21 @@ def detect_scenes_ffmpeg(
         # silently disable that fallback.
         return []
 
-    spans: list[tuple[float, float]] = []
-    boundaries = [lo, *cuts, hi]
-    for start, end in zip(boundaries, boundaries[1:], strict=False):
-        if end > start:
-            spans.append((round(start, 3), round(end, 3)))
-    return spans
+    return [(round(start, 3), round(end, 3))
+            for start, end in zip([lo, *cuts], [*cuts, hi], strict=True)
+            if end > start]
 
 
 def _import_scenedetect():
     try:
+        # pylint: disable-next=import-outside-toplevel
         from scenedetect import ContentDetector, detect  # noqa: PLC0415
     except ImportError as exc:
         raise PerceptionError(
             "PySceneDetect is not installed",
             code="perceive.missing_dependency",
-            fix='install the perception extras: `uv sync --extra perceive` or `pip install "watch-skill[perceive]"`',
+            fix='install the perception extras: `uv sync --extra perceive` or '
+                '`pip install "watch-skill[perceive]"`',
         ) from exc
     return detect, ContentDetector
 
@@ -140,18 +149,18 @@ def detect_scenes(
     window on a slow machine). An empty list means the video is effectively
     one static shot — callers fall back to uniform sampling.
     """
-    detect, ContentDetector = _import_scenedetect()
+    detect, content_detector = _import_scenedetect()
     try:
         scene_list = detect(
             str(video_path),
-            ContentDetector(),
+            content_detector(),
             start_time=start_seconds,
             end_time=end_seconds,
         )
     except TypeError:
         # older scenedetect without start/end kwargs — full scan fallback
         try:
-            scene_list = detect(str(video_path), ContentDetector())
+            scene_list = detect(str(video_path), content_detector())
         except Exception as exc:
             raise PerceptionError(
                 f"scene detection failed: {exc}",
@@ -178,8 +187,10 @@ def detect_scenes(
 def compute_phash(image_path: Path) -> str:
     """Perceptual hash (phash) of an image, as a hex string."""
     try:
+        # pylint: disable=import-outside-toplevel
         import imagehash  # noqa: PLC0415
         from PIL import Image  # noqa: PLC0415
+        # pylint: enable=import-outside-toplevel
     except ImportError as exc:
         raise PerceptionError(
             "imagehash/Pillow are not installed",

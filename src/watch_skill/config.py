@@ -49,7 +49,9 @@ class Settings(BaseSettings):
     ffmpeg_hw_device: str = Field(
         default="", description="FFmpeg hardware decode device; empty lets FFmpeg choose."
     )
-    frame_width: int = Field(default=512, description="Extracted frame width in px.")
+    ffmpeg_scene_max_dimension: int = Field(default=640, ge=2)
+    ffmpeg_scene_fps: float = Field(default=2.0, gt=0, allow_inf_nan=False)
+    frame_width: int = Field(default=1536, ge=2, description="Extracted frame width in px.")
     max_video_height: int = Field(
         default=720,
         ge=144,

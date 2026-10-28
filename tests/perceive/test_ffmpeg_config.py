@@ -91,9 +91,10 @@ def test_detection_failure_keeps_uniform_fallback(backend, monkeypatch, capsys) 
 @pytest.mark.parametrize(("backend", "device", "expected"), [
     ("", "", []),
     ("", "/dev/dri/renderD128", []),
-    ("vaapi", "", ["-hwaccel", "vaapi"]),
+    ("vaapi", "", ["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"]),
     ("vaapi", "/dev/dri/renderD128", [
         "-hwaccel", "vaapi", "-hwaccel_device", "/dev/dri/renderD128",
+        "-hwaccel_output_format", "vaapi",
     ]),
     ("cuda", "0", ["-hwaccel", "cuda", "-hwaccel_device", "0"]),
 ])
@@ -108,25 +109,30 @@ def test_shared_hardware_input_args(backend, device, expected, operation, tmp_pa
     assert hardware_decode_args() == expected
     assert scenes.hardware_decode_args is media.hardware_decode_args is hardware_decode_args
     monkeypatch.setattr(media, "probe", lambda path: VideoMetadata(10, 320, 180, 30, "h264", False))
-    monkeypatch.setattr(media, "require_binary", lambda name: Path(name))
-    monkeypatch.setattr(scenes, "require_binary", lambda name: Path(name))
+    monkeypatch.setattr(media, "require_binary", Path)
+    monkeypatch.setattr(scenes, "require_binary", Path)
     run = Mock(return_value=subprocess.CompletedProcess([], 0, stderr="pts_time:2.0"))
     monkeypatch.setattr(subprocess, "run", run)
     video = tmp_path / "video with spaces.mp4"
     if operation == "scenes":
         assert scenes.detect_scenes_ffmpeg(video, 1, 5) == [(1, 3), (3, 5)]
         prefix = ["ffmpeg", "-hide_banner", "-loglevel", "info", "-ss", "1.000"]
-        suffix = ["-t", "4.000", "-an", "-vf", "select=gt(scene\\,0.3),showinfo",
+        vf = "select=gt(scene\\,0.3),showinfo"
+        if backend == "vaapi":
+            vf = f"{media.vaapi_scale_filter(640, 640)},fps=2.0,{vf}"
+        suffix = ["-t", "4.000", "-an", "-vf", vf,
                   "-f", "null", "-"]
     else:
         dest = tmp_path / "frame.jpg"
         dest.write_bytes(b"jpeg")
         assert media.extract_frame_at(video, 1, dest) == dest
         prefix = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", "1.000"]
-        suffix = ["-frames:v", "1", "-vf", media._scale_filter(512), "-q:v", "4", str(dest)]
+        vf = (media.vaapi_scale_filter(1536, media.MAX_READ_DIMENSION)
+              if backend == "vaapi" else media._scale_filter(1536))
+        suffix = ["-frames:v", "1", "-vf", vf, "-q:v", "4", str(dest)]
     command = run.call_args.args[0]
     assert command == [*prefix, *expected, "-i", str(video.resolve()), *suffix]
-    assert "-hwaccel_output_format" not in command
+    assert ("-hwaccel_output_format" in command) == (backend == "vaapi")
     if expected:
         assert command.index("-hwaccel") < command.index("-i")
     run.assert_called_once()
@@ -137,8 +143,8 @@ def test_hardware_failure_is_structured_without_retry(operation, tmp_path, monke
     monkeypatch.setenv("WATCHSKILL_FFMPEG_HWACCEL", "vaapi")
     reset_settings()
     monkeypatch.setattr(media, "probe", lambda path: VideoMetadata(10, 320, 180, 30, "h264", False))
-    monkeypatch.setattr(media, "require_binary", lambda name: Path(name))
-    monkeypatch.setattr(scenes, "require_binary", lambda name: Path(name))
+    monkeypatch.setattr(media, "require_binary", Path)
+    monkeypatch.setattr(scenes, "require_binary", Path)
     run = Mock(return_value=subprocess.CompletedProcess(
         [], 1, stderr="Device creation failed: unavailable VAAPI device"
     ))
@@ -162,8 +168,33 @@ def test_hardware_failure_is_structured_without_retry(operation, tmp_path, monke
 def test_missing_frame_still_skipped(hardware, returncode, tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("WATCHSKILL_FFMPEG_HWACCEL", hardware)
     reset_settings()
-    monkeypatch.setattr(media, "require_binary", lambda name: Path(name))
+    monkeypatch.setattr(media, "require_binary", Path)
     monkeypatch.setattr(subprocess, "run", Mock(return_value=subprocess.CompletedProcess(
         [], returncode, stderr=""
     )))
     assert media.extract_frame_at(tmp_path / "video.mp4", 1000, tmp_path / "frame.jpg") is None
+
+
+def test_vaapi_scene_settings_are_independent(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("WATCHSKILL_FFMPEG_HWACCEL", "vaapi")
+    monkeypatch.setenv("WATCHSKILL_FFMPEG_SCENE_MAX_DIMENSION", "960")
+    monkeypatch.setenv("WATCHSKILL_FFMPEG_SCENE_FPS", "3")
+    monkeypatch.setenv("WATCHSKILL_FRAME_WIDTH", "1200")
+    reset_settings()
+    monkeypatch.setattr(media, "probe", lambda path: VideoMetadata(10, 320, 180, 30, "h264", False))
+    monkeypatch.setattr(scenes, "require_binary", Path)
+    run = Mock(return_value=subprocess.CompletedProcess([], 0, stderr="pts_time:2.0"))
+    monkeypatch.setattr(subprocess, "run", run)
+    assert scenes.detect_scenes_ffmpeg(tmp_path / "video.mp4", 1, 5) == [(1, 3), (3, 5)]
+    vf = run.call_args.args[0][run.call_args.args[0].index("-vf") + 1]
+    assert "min(960,iw)" in vf and "min(960,ih)" in vf
+    assert "fps=3.0" in vf and "1200" not in vf
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"ffmpeg_scene_max_dimension": 0}, {"ffmpeg_scene_fps": 0},
+    {"ffmpeg_scene_fps": float("inf")}, {"frame_width": 0},
+])
+def test_invalid_scale_settings_rejected(kwargs) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**kwargs)

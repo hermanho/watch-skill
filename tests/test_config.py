@@ -10,7 +10,7 @@ from watch_skill.config import Settings, get_settings, reset_settings
 
 def test_defaults_inherit_reference_frame_economics() -> None:
     settings = get_settings()
-    assert settings.frame_width == 512
+    assert settings.frame_width == 1536
     assert settings.frame_cap == 100
     assert settings.max_fps == 2.0
 

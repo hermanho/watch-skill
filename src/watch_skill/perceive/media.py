@@ -5,9 +5,10 @@ import json
 import subprocess
 from pathlib import Path
 
+from watch_skill.config import get_settings
 from watch_skill.errors import PerceptionError
 from watch_skill.health.binaries import require_binary
-from watch_skill.perceive.ffmpeg import hardware_decode_args
+from watch_skill.perceive.ffmpeg import hardware_decode_args, vaapi_scale_filter
 from watch_skill.perceive.types import VideoMetadata
 
 MAX_READ_DIMENSION = 1998  # Claude Read tool image-height limit (reference-proven)
@@ -66,7 +67,7 @@ def _scale_filter(width: int) -> str:
 
 
 def extract_frame_at(
-    video_path: Path, timestamp_seconds: float, dest: Path, width: int = 512
+    video_path: Path, timestamp_seconds: float, dest: Path, width: int | None = None
 ) -> Path | None:
     """Grab one scaled JPEG at ``timestamp_seconds`` (fast input seek).
 
@@ -75,14 +76,17 @@ def extract_frame_at(
     """
     ffmpeg = require_binary("ffmpeg")
     dest.parent.mkdir(parents=True, exist_ok=True)
+    width = width if width is not None else get_settings().frame_width
     hwaccel_args = hardware_decode_args()
+    scale = (vaapi_scale_filter(width, MAX_READ_DIMENSION)
+             if get_settings().ffmpeg_hwaccel == "vaapi" else _scale_filter(width))
     cmd = [
         str(ffmpeg), "-hide_banner", "-loglevel", "error", "-y",
         "-ss", f"{max(0.0, timestamp_seconds):.3f}",
         *hwaccel_args,
         "-i", str(video_path.resolve()),
         "-frames:v", "1",
-        "-vf", _scale_filter(width),
+        "-vf", scale,
         "-q:v", "4",
         str(dest),
     ]

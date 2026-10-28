@@ -49,7 +49,9 @@ cases), `<data_dir>/health.jsonl` (incident log),
 | `WATCHSKILL_SCENE_BACKEND` | str | `scenedetect` | Scene detector: `scenedetect` or `ffmpeg`. |
 | `WATCHSKILL_FFMPEG_HWACCEL` | str | empty | Optional FFmpeg hardware decode backend (e.g. `vaapi` or `cuda`); empty disables it. Applies to FFmpeg scene detection and frame extraction. |
 | `WATCHSKILL_FFMPEG_HW_DEVICE` | str | empty | Optional hardware decode device; unset lets FFmpeg choose. Ignored when hardware decode is disabled. |
-| `WATCHSKILL_FRAME_WIDTH` | int | `512` | Extracted frame width in pixels. Higher = sharper OCR, more tokens per frame if sent to a vision model. |
+| `WATCHSKILL_FFMPEG_SCENE_MAX_DIMENSION` | int | `640` | Maximum scene analysis dimension for VAAPI. |
+| `WATCHSKILL_FFMPEG_SCENE_FPS` | float | `2.0` | VAAPI scene analysis frames per second; short cuts may be missed. |
+| `WATCHSKILL_FRAME_WIDTH` | int | `1536` | Extracted frame width in pixels. Higher = sharper OCR, more tokens per frame if sent to a vision model. |
 | `WATCHSKILL_FRAME_CAP` | int | `100` | Hard cap on frames per analysis, regardless of duration. |
 | `WATCHSKILL_MAX_FPS` | float | `2.0` | Universal sampling-rate ceiling; even focused mode never samples denser than this. |
 | `WATCHSKILL_PHASH_DISTANCE` | int | `6` | Max Hamming distance between perceptual hashes for two frames to count as near-duplicates (and be deduplicated). Lower = keep more similar frames. |
@@ -76,13 +78,13 @@ built with the requested backend, with a working driver and device access.
 Managed binaries take precedence over PATH; ensure the binary Watch Skill
 resolves has the required support.
 
-Both FFmpeg scene detection and JPEG extraction receive `-hwaccel` and the
-optional `-hwaccel_device` before `-i`. No `-hwaccel_output_format` is forced:
-scene filters (`select`/`showinfo`), software scaling, JPEG encoding and OCR
-retain their existing CPU processing. [Frame transfers to system
-memory](https://ffmpeg.org/ffmpeg.html#Advanced-Video-options) also have a cost,
-so configuring hardware decode does not establish a speedup or verify that
-your codec is hardware decoded. Verify runtime behavior separately.
+VAAPI outputs GPU frames and scales them with `scale_vaapi` before downloading
+to system memory. Scene detection uses its separate size and FPS settings;
+JPEG extraction uses `WATCHSKILL_FRAME_WIDTH` and retains the 1998-pixel
+height limit. Scaling preserves aspect ratio and avoids enlarging small frames.
+Other hardware and software backends retain their existing filter paths.
+VAAPI requires a compatible FFmpeg build, driver, codec and device; validate
+the actual media and pixel formats on the target machine.
 
 Failed FFmpeg commands use `PerceptionError`, without a software-decode retry
 or backend switch. Scene detection retains its existing graceful fallback to
@@ -249,7 +251,7 @@ the output for the calling agent.
 | `--start` | time (`SS`, `MM:SS`, `HH:MM:SS`) | none | Range start; with `--end`, switches to the denser focused-mode frame budget. |
 | `--end` | time | none | Range end. |
 | `--max-frames` | int | config `frame_cap` (100) | Override the frame cap for this run. |
-| `--resolution` | int | config `frame_width` (512) | Frame width in px. |
+| `--resolution` | int | config `frame_width` (1536) | Frame width in px. |
 | `--timestamps` | comma-separated times | none | Pin frames at exact absolute times, in addition to scene sampling. |
 | `--transcript-only` | flag | off | Skip frame extraction entirely; captions-first fast path. |
 | `--no-ocr` | flag | off | Skip the OCR pass. |

@@ -1,0 +1,11 @@
+{
+  "python-envs.defaultEnvManager": "ms-python.python:system",
+  "pylint.cwd": "${workspaceFolder}",
+  "pylint.args": [
+    "--init-hook=import os, sys; sys.path.insert(0, os.path.abspath(\"src\"))"
+  ],
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "pylint.interpreter": [
+    "${workspaceFolder}/.venv/bin/python"
+  ]
+}
